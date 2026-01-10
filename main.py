@@ -1,6 +1,7 @@
 import re
 import telebot
 import gspread
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import os
@@ -8,7 +9,7 @@ import os
 TOKEN = os.getenv("BOT_TOKEN")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
 
-bot = telebot.TeleBot("8505854707:AAE31hekBEsjcO0QlnfmW8HA_VQ8SMtjJ8U")
+bot = telebot.TeleBot(TOKEN)
 
 scope = [
     "https://spreadsheets.google.com/feeds",
@@ -16,17 +17,10 @@ scope = [
 ]
 
 
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(
+    json.loads(GOOGLE_CREDENTIALS), scope
+)
 client = gspread.authorize(creds)
-print("Доступные таблицы:")
-try:
-    spreadsheets = client.list_spreadsheet_files()
-    for s in spreadsheets:
-        print(f"- {s['name']}")
-except Exception as e:
-    print("Нет доступа:", e)
-    exit()
-
 sheet = client.open("finance_analys").worksheet("unload_TG")
 
 
