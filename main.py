@@ -54,7 +54,7 @@ def home():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
     bot.remove_webhook()
-    bot.set_webhook(url=f"https://financeTG_bot.onrender.com/{TOKEN}")
+    bot.set_webhook(url=f"https://financetg-bot.onrender.com/{TOKEN}")
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
