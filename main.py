@@ -30,7 +30,7 @@ def handle_message(message):
     text = message.text.strip()
     if re.search(r"[а-яёА-ЯЁa-z]+\s*\d+", text):
         parts = re.split(r"\s+", text, 1)
-        product, amount = parts[0], parts[1]
+        product, amount = parts[0], int(parts[1])
         data = [text, product, amount, datetime.now().strftime("%d.%m.%Y")]
         sheet.append_row(data)
         bot.reply_to(message, f"✅ {product}: {amount}")
