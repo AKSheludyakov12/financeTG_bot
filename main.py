@@ -1,10 +1,13 @@
-import re
+from flask import Flask, request
 import telebot
 import gspread
 import json
+import re
+import os
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import os
+
+app = Flask(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
@@ -15,8 +18,6 @@ scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive",
 ]
-
-
 creds = ServiceAccountCredentials.from_json_keyfile_dict(
     json.loads(GOOGLE_CREDENTIALS), scope
 )
@@ -27,13 +28,9 @@ sheet = client.open("finance_analys").worksheet("unload_TG")
 @bot.message_handler(content_types=["text"])
 def handle_message(message):
     text = message.text.strip()
-
     if re.search(r"[а-яёА-ЯЁa-z]+\s*\d+", text):
-        # РАЗДЕЛЯЕМ на текст и число
         parts = re.split(r"\s+", text, 1)
-        product = parts[0]
-        amount = int(parts[1])
-
+        product, amount = parts[0], parts[1]
         data = [text, product, amount, datetime.now().strftime("%d.%m.%Y")]
         sheet.append_row(data)
         bot.reply_to(message, f"✅ {product}: {amount}")
@@ -41,4 +38,23 @@ def handle_message(message):
         bot.reply_to(message, "❌ Формат: кофе 500")
 
 
-bot.polling(none_stop=True)
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    if request.headers.get("content-type") == "application/json":
+        json_string = request.get_data().decode("utf-8")
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ""
+    return "OK!"
+
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://financeTG_bot.onrender.com/{TOKEN}")
+    app.run(host="0.0.0.0", port=port)
