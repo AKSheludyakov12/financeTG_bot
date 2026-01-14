@@ -1,22 +1,11 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
+import telebot
 import gspread
 import json
 import os
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.filters import CommandStart
-import asyncio
-import uvicorn
+import re
 
 app = Flask(__name__)
 
@@ -34,85 +23,111 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(
 client = gspread.authorize(creds)
 sheet = client.open("finance_analys").worksheet("unload_TG")
 
-bot = Bot(token=TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+bot = telebot.TeleBot(TOKEN)
+
+# Хранилище состояний (простой словарь)
+user_states = {}
+
+MAIN_KEYBOARD = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+MAIN_KEYBOARD.add("Доход", "Расход")
+
+INCOME_KEYBOARD = telebot.types.InlineKeyboardMarkup()
+INCOME_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Зарплата", callback_data="income_salary")
+)
+INCOME_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Фриланс", callback_data="income_freelance")
+)
+INCOME_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Подарки", callback_data="income_gift")
+)
+INCOME_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Другое", callback_data="income_other")
+)
+
+EXPENSE_KEYBOARD = telebot.types.InlineKeyboardMarkup()
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Покупки", callback_data="expense_shopping")
+)
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Платежи", callback_data="expense_payments")
+)
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Задолженности", callback_data="expense_debt")
+)
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Развлечения", callback_data="expense_fun")
+)
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Другое", callback_data="expense_other")
+)
 
 
-class Form(StatesGroup):
-    waiting_category = State()
-    waiting_comment = State()
-    waiting_amount = State()
+@bot.message_handler(commands=["start"])
+def start_handler(message):
+    bot.send_message(message.chat.id, "Выберите тип:", reply_markup=MAIN_KEYBOARD)
+    user_states[message.from_user.id] = {"step": "waiting_type"}
 
 
-@dp.message(CommandStart())
-async def start_handler(message, state: FSMContext):
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Доход"), KeyboardButton(text="Расход")]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
+@bot.message_handler(
+    func=lambda message: message.text == "Доход" and message.from_user.id in user_states
+)
+def income_type(message):
+    bot.send_message(message.chat.id, "Категория дохода:", reply_markup=INCOME_KEYBOARD)
+    user_states[message.from_user.id] = {"step": "waiting_category", "type": "income"}
+
+
+@bot.message_handler(
+    func=lambda message: message.text == "Расход"
+    and message.from_user.id in user_states
+)
+def expense_type(message):
+    bot.send_message(
+        message.chat.id, "Категория расхода:", reply_markup=EXPENSE_KEYBOARD
+    )
+    user_states[message.from_user.id] = {"step": "waiting_category", "type": "expense"}
+
+
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith(("income_", "expense_"))
+)
+def process_category(call):
+    user_id = call.from_user.id
+    type_, category = call.data.split("_", 1)
+
+    user_states[user_id] = {
+        "step": "waiting_comment",
+        "type": type_,
+        "category": category,
+    }
+
+    bot.edit_message_text(
+        f"✅ {type_.title()} - {category.title()}\n\n📝 Введите комментарий:",
+        call.message.chat.id,
+        call.message.message_id,
     )
 
-    await message.answer("Выберите тип:", reply_markup=keyboard)
-    await state.set_state(Form.waiting_category)
+
+@bot.message_handler(
+    func=lambda message: message.from_user.id in user_states
+    and user_states[message.from_user.id]["step"] == "waiting_comment"
+)
+def process_comment(message):
+    user_id = message.from_user.id
+    user_states[user_id]["comment"] = message.text
+    user_states[user_id]["step"] = "waiting_amount"
+    bot.send_message(message.chat.id, "💰 Введите сумму:")
 
 
-@dp.message(F.text == "Доход")
-async def income_type(message, state: FSMContext):
-    inline_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Зарплата", callback_data="income_salary")],
-            [InlineKeyboardButton(text="Фриланс", callback_data="income_freelance")],
-            [InlineKeyboardButton(text="Подарки", callback_data="income_gift")],
-            [InlineKeyboardButton(text="Другое", callback_data="income_other")],
-        ]
-    )
-    await message.answer("Категория дохода:", reply_markup=inline_kb)
-    await state.set_state(Form.waiting_category)
-
-
-@dp.message(F.text == "Расход")
-async def expense_type(message, state: FSMContext):
-    inline_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Покупки", callback_data="expense_shopping")],
-            [InlineKeyboardButton(text="Платежи", callback_data="expense_payments")],
-            [InlineKeyboardButton(text="Задолженности", callback_data="expense_debt")],
-            [InlineKeyboardButton(text="Развлечения", callback_data="expense_fun")],
-            [InlineKeyboardButton(text="Другое", callback_data="expense_other")],
-        ]
-    )
-    await message.answer("Категория расхода:", reply_markup=inline_kb)
-    await state.set_state(Form.waiting_category)
-
-
-@dp.callback_query(F.data.startswith(("income_", "expense_")))
-async def process_category(callback, state: FSMContext):
-    category_data = callback.data.split("_", 1)
-    type_ = category_data[0]
-    category = category_data[1]
-
-    await state.update_data(type=type_, category=category)
-    await callback.message.edit_text(
-        f"✅ Выбрано: {type_.title()} - {category.title()}\n\n"
-        f"📝 Введите комментарий:\n(например: 'Сигареты' или 'Зарплата январь')"
-    )
-    await state.set_state(Form.waiting_comment)
-    await callback.answer()
-
-
-@dp.message(Form.waiting_comment)
-async def process_comment(message, state: FSMContext):
-    await state.update_data(comment=message.text)
-    await message.answer("💰 Введите сумму (число):")
-    await state.set_state(Form.waiting_amount)
-
-
-@dp.message(Form.waiting_amount)
-async def process_amount(message, state: FSMContext):
+@bot.message_handler(
+    func=lambda message: message.from_user.id in user_states
+    and user_states[message.from_user.id]["step"] == "waiting_amount"
+)
+def process_amount(message):
+    user_id = message.from_user.id
     try:
         amount = float(message.text.replace(",", "."))
-        data = await state.get_data()
+        data = user_states[user_id]
 
         # Сохраняем в Google Sheets
         record = [
@@ -125,7 +140,8 @@ async def process_amount(message, state: FSMContext):
         ]
         sheet.append_row(record)
 
-        await message.answer(
+        bot.send_message(
+            message.chat.id,
             f"✅ *Запись сохранена!*\n\n"
             f"👤 {record[0]}\n"
             f"📊 {record[1]}: {record[2]}\n"
@@ -135,35 +151,33 @@ async def process_amount(message, state: FSMContext):
             parse_mode="Markdown",
         )
 
-    except ValueError:
-        await message.answer("❌ Введите корректную сумму (например: 67000 или 245.50)")
-        return
+        # Очищаем состояние
+        del user_states[user_id]
+        bot.send_message(message.chat.id, "➕ Что дальше?", reply_markup=MAIN_KEYBOARD)
 
-    await state.clear()
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Доход"), KeyboardButton(text="Расход")]],
-        resize_keyboard=True,
-    )
-    await message.answer("➕ Что дальше?", reply_markup=keyboard)
+    except ValueError:
+        bot.send_message(
+            message.chat.id, "❌ Введите корректную сумму (например: 67000)"
+        )
 
 
 @app.route(f"/{TOKEN}", methods=["POST"])
-async def webhook():
-    json_string = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_string)
-
-    # Обработка через aiogram
-    if update:
-        await dp.feed_update(bot, update.to_python())  # Конвертируем для aiogram
-
-    return "OK"
+def webhook():
+    if request.headers.get("content-type") == "application/json":
+        json_string = request.get_data().decode("utf-8")
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ""
+    return "OK!"
 
 
 @app.route("/")
 def home():
-    return "🚀 Finance Bot is running!"
+    return "🚀 Finance Bot работает!"
 
 
 if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://financetg-bot.onrender.com/{TOKEN}")
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
