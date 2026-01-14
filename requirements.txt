@@ -1,4 +1,7 @@
-pyTelegramBotAPI
-gspread
-oauth2client
-flask
+aiogram==3.13.1
+gspread==6.1.0
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+python-dotenv==1.0.1
+uvicorn==0.32.0
