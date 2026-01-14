@@ -7,3 +7,5 @@ python-dotenv==1.0.1
 uvicorn==0.32.0
 flask
 oauth2client
+pyTelegramBotAPI
+gspread

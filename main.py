@@ -10,13 +10,13 @@ from aiogram.types import (
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    Message,
-    CallbackQuery,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import CommandStart
 import asyncio
+import uvicorn
 
 app = Flask(__name__)
 
@@ -39,74 +39,86 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 
-# FSM состояния
 class Form(StatesGroup):
     waiting_category = State()
     waiting_comment = State()
     waiting_amount = State()
 
 
-@dp.message(commands=["start"])
-async def start_handler(message: Message, state: FSMContext):
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(KeyboardButton("Доход"), KeyboardButton("Расход"))
+@dp.message(CommandStart())
+async def start_handler(message, state: FSMContext):
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Доход"), KeyboardButton(text="Расход")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
     await message.answer("Выберите тип:", reply_markup=keyboard)
     await state.set_state(Form.waiting_category)
 
 
 @dp.message(F.text == "Доход")
-async def income_category(message: Message, state: FSMContext):
-    inline_kb = InlineKeyboardMarkup(row_width=2)
-    inline_kb.add(InlineKeyboardButton("Зарплата", callback_data="income_salary"))
-    inline_kb.add(InlineKeyboardButton("Фриланс", callback_data="income_freelance"))
-    inline_kb.add(InlineKeyboardButton("Подарки", callback_data="income_gift"))
-    inline_kb.add(InlineKeyboardButton("Другое", callback_data="income_other"))
+async def income_type(message, state: FSMContext):
+    inline_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Зарплата", callback_data="income_salary")],
+            [InlineKeyboardButton(text="Фриланс", callback_data="income_freelance")],
+            [InlineKeyboardButton(text="Подарки", callback_data="income_gift")],
+            [InlineKeyboardButton(text="Другое", callback_data="income_other")],
+        ]
+    )
     await message.answer("Категория дохода:", reply_markup=inline_kb)
     await state.set_state(Form.waiting_category)
 
 
 @dp.message(F.text == "Расход")
-async def expense_category(message: Message, state: FSMContext):
-    inline_kb = InlineKeyboardMarkup(row_width=2)
-    inline_kb.add(InlineKeyboardButton("Покупки", callback_data="expense_shopping"))
-    inline_kb.add(InlineKeyboardButton("Платежи", callback_data="expense_payments"))
-    inline_kb.add(InlineKeyboardButton("Задолженности", callback_data="expense_debt"))
-    inline_kb.add(InlineKeyboardButton("Развлечения", callback_data="expense_fun"))
-    inline_kb.add(InlineKeyboardButton("Другое", callback_data="expense_other"))
+async def expense_type(message, state: FSMContext):
+    inline_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Покупки", callback_data="expense_shopping")],
+            [InlineKeyboardButton(text="Платежи", callback_data="expense_payments")],
+            [InlineKeyboardButton(text="Задолженности", callback_data="expense_debt")],
+            [InlineKeyboardButton(text="Развлечения", callback_data="expense_fun")],
+            [InlineKeyboardButton(text="Другое", callback_data="expense_other")],
+        ]
+    )
     await message.answer("Категория расхода:", reply_markup=inline_kb)
     await state.set_state(Form.waiting_category)
 
 
 @dp.callback_query(F.data.startswith(("income_", "expense_")))
-async def process_category(callback: CallbackQuery, state: FSMContext):
-    category = callback.data.split("_", 1)[1]
-    await state.update_data(category=category, type=callback.data.split("_")[0])
+async def process_category(callback, state: FSMContext):
+    category_data = callback.data.split("_", 1)
+    type_ = category_data[0]
+    category = category_data[1]
+
+    await state.update_data(type=type_, category=category)
     await callback.message.edit_text(
-        f"Выбрано: {callback.data.replace('_', ' ').title()}\n\n"
-        f"Введите комментарий (например, 'Сигареты' или 'Зарплата январь'):"
+        f"✅ Выбрано: {type_.title()} - {category.title()}\n\n"
+        f"📝 Введите комментарий:\n(например: 'Сигареты' или 'Зарплата январь')"
     )
     await state.set_state(Form.waiting_comment)
     await callback.answer()
 
 
 @dp.message(Form.waiting_comment)
-async def process_comment(message: Message, state: FSMContext):
+async def process_comment(message, state: FSMContext):
     await state.update_data(comment=message.text)
-    await message.answer("Введите сумму (число):")
+    await message.answer("💰 Введите сумму (число):")
     await state.set_state(Form.waiting_amount)
 
 
 @dp.message(Form.waiting_amount)
-async def process_amount(message: Message, state: FSMContext):
+async def process_amount(message, state: FSMContext):
     try:
-        amount = float(message.text)
+        amount = float(message.text.replace(",", "."))
         data = await state.get_data()
 
         # Сохраняем в Google Sheets
         record = [
-            message.from_user.id,
+            message.from_user.first_name or "Unknown",
             data["type"].title(),
-            data["category"],
+            data["category"].title(),
             data["comment"],
             amount,
             datetime.now().strftime("%d.%m.%Y %H:%M"),
@@ -114,40 +126,44 @@ async def process_amount(message: Message, state: FSMContext):
         sheet.append_row(record)
 
         await message.answer(
-            f"✅ Запись добавлена!\n"
-            f"Тип: {data['type'].title()}\n"
-            f"Категория: {data['category']}\n"
-            f"Комментарий: {data['comment']}\n"
-            f"Сумма: {amount}₽\n"
-            f"Дата: {record[-1]}"
+            f"✅ *Запись сохранена!*\n\n"
+            f"👤 {record[0]}\n"
+            f"📊 {record[1]}: {record[2]}\n"
+            f"📝 {record[3]}\n"
+            f"💰 *{amount}₽*\n"
+            f"📅 {record[-1]}",
+            parse_mode="Markdown",
         )
+
     except ValueError:
-        await message.answer("❌ Неверная сумма. Введите число.")
+        await message.answer("❌ Введите корректную сумму (например: 67000 или 245.50)")
         return
 
     await state.clear()
-    # Возвращаем в главное меню
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(KeyboardButton("Доход"), KeyboardButton("Расход"))
-    await message.answer("Что дальше?", reply_markup=keyboard)
-    await state.set_state(Form.waiting_category)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Доход"), KeyboardButton(text="Расход")]],
+        resize_keyboard=True,
+    )
+    await message.answer("➕ Что дальше?", reply_markup=keyboard)
 
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
-    # Используем aiogram для обработки
-    await dp.feed_update(bot, update)
+    json_string = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_string)
+
+    # Обработка через aiogram
+    if update:
+        await dp.feed_update(bot, update.to_python())  # Конвертируем для aiogram
+
     return "OK"
 
 
 @app.route("/")
 def home():
-    return "Bot is running!"
+    return "🚀 Finance Bot is running!"
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
