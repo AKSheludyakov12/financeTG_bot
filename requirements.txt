@@ -6,3 +6,4 @@ google-auth-httplib2==0.2.0
 python-dotenv==1.0.1
 uvicorn==0.32.0
 flask
+oauth2client
