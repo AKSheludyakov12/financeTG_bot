@@ -61,7 +61,12 @@ EXPENSE_KEYBOARD.add(
 EXPENSE_KEYBOARD.add(
     telebot.types.InlineKeyboardButton("Другое", callback_data="expense_other")
 )
-
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Транспорт", callback_data="expense_transfer")
+)
+EXPENSE_KEYBOARD.add(
+    telebot.types.InlineKeyboardButton("Одежда/обувь", callback_data="expense_cloth")
+)
 
 @bot.message_handler(commands=["start"])
 def start_handler(message):
