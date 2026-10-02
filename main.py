@@ -25,7 +25,7 @@ sheet = client.open("finance_analys").worksheet("unload_TG")
 
 bot = telebot.TeleBot(TOKEN)
 
-# Хранилище состояний (простой словарь)
+# Хранилище состояний
 user_states = {}
 
 MAIN_KEYBOARD = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -69,18 +69,15 @@ def start_handler(message):
     user_states[message.from_user.id] = {"step": "waiting_type"}
 
 
-@bot.message_handler(
-    func=lambda message: message.text == "Доход" and message.from_user.id in user_states
-)
+# Убрали проверку "and message.from_user.id in user_states", чтобы кнопка работала всегда
+@bot.message_handler(func=lambda message: message.text == "Доход")
 def income_type(message):
     bot.send_message(message.chat.id, "Категория дохода:", reply_markup=INCOME_KEYBOARD)
     user_states[message.from_user.id] = {"step": "waiting_category", "type": "income"}
 
 
-@bot.message_handler(
-    func=lambda message: message.text == "Расход"
-    and message.from_user.id in user_states
-)
+# Убрали проверку "and message.from_user.id in user_states"
+@bot.message_handler(func=lambda message: message.text == "Расход")
 def expense_type(message):
     bot.send_message(
         message.chat.id, "Категория расхода:", reply_markup=EXPENSE_KEYBOARD
@@ -151,13 +148,20 @@ def process_amount(message):
             parse_mode="Markdown",
         )
 
-        # Очищаем состояние
+        # Очищаем состояние для следующего круга
         del user_states[user_id]
         bot.send_message(message.chat.id, "➕ Что дальше?", reply_markup=MAIN_KEYBOARD)
 
     except ValueError:
         bot.send_message(
             message.chat.id, "❌ Введите корректную сумму (например: 67000)"
+        )
+    except Exception as e:
+        # На случай других ошибок (например, отвалились Гугл Таблицы), чтобы юзер не зависал
+        if user_id in user_states:
+            del user_states[user_id]
+        bot.send_message(
+            message.chat.id, "❌ Произошла ошибка при сохранении. Попробуйте заново.", reply_markup=MAIN_KEYBOARD
         )
 
 
@@ -169,7 +173,7 @@ def webhook():
         bot.process_new_updates([update])
         return ""
     return "OK!"
-
+# чч
 
 @app.route("/")
 def home():
