@@ -145,8 +145,8 @@ def process_amount(message):
             data["category"].title(),
             data["comment"],
             amount,
-            current_month,
             now.strftime("%d.%m.%Y %H:%M"),
+            current_month,
         ]
         sheet.append_row(record)
 
