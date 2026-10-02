@@ -28,6 +28,12 @@ bot = telebot.TeleBot(TOKEN)
 # Хранилище состояний
 user_states = {}
 
+# Словарь месяцев для текстового формата на русском языке
+MONTHS_RU = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
+    7: "июля", 8: "августа", 9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+}
+
 MAIN_KEYBOARD = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
 MAIN_KEYBOARD.add("Доход", "Расход")
 
@@ -74,14 +80,12 @@ def start_handler(message):
     user_states[message.from_user.id] = {"step": "waiting_type"}
 
 
-# Убрали проверку "and message.from_user.id in user_states", чтобы кнопка работала всегда
 @bot.message_handler(func=lambda message: message.text == "Доход")
 def income_type(message):
     bot.send_message(message.chat.id, "Категория дохода:", reply_markup=INCOME_KEYBOARD)
     user_states[message.from_user.id] = {"step": "waiting_category", "type": "income"}
 
 
-# Убрали проверку "and message.from_user.id in user_states"
 @bot.message_handler(func=lambda message: message.text == "Расход")
 def expense_type(message):
     bot.send_message(
@@ -131,14 +135,18 @@ def process_amount(message):
         amount = float(message.text.replace(",", "."))
         data = user_states[user_id]
 
-        # Сохраняем в Google Sheets
+        now = datetime.now()
+        current_month = MONTHS_RU[now.month]
+
+        # Добавлена новая колонка с месяцем на 5-ю позицию (перед датой)
         record = [
             message.from_user.first_name or "Unknown",
             data["type"].title(),
             data["category"].title(),
             data["comment"],
             amount,
-            datetime.now().strftime("%d.%m.%Y %H:%M"),
+            current_month,
+            now.strftime("%d.%m.%Y %H:%M"),
         ]
         sheet.append_row(record)
 
@@ -148,6 +156,7 @@ def process_amount(message):
             f"👤 {record[0]}\n"
             f"📊 {record[1]}: {record[2]}\n"
             f"📝 {record[3]}\n"
+            f"📅 Месяц: {record[5]}\n"
             f"💰 *{amount}₽*\n"
             f"📅 {record[-1]}",
             parse_mode="Markdown",
@@ -162,7 +171,6 @@ def process_amount(message):
             message.chat.id, "❌ Введите корректную сумму (например: 67000)"
         )
     except Exception as e:
-        # На случай других ошибок (например, отвалились Гугл Таблицы), чтобы юзер не зависал
         if user_id in user_states:
             del user_states[user_id]
         bot.send_message(
@@ -178,7 +186,7 @@ def webhook():
         bot.process_new_updates([update])
         return ""
     return "OK!"
-# чч
+
 
 @app.route("/")
 def home():
